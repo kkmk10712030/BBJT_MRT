@@ -1,0 +1,1702 @@
+<!DOCTYPE html>
+<html lang="zh-TW" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>北北基桃 即時交通儀表板 - Greater Taipei Transit Dashboard</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            'mrt-br': '#C48C31', // 文湖線
+            'mrt-r': '#E3002C',  // 淡水信義線
+            'mrt-g': '#008659',  // 松山新店線
+            'mrt-o': '#F8B61C',  // 中和新蘆線
+            'mrt-b': '#0070BD',  // 板南線
+            'mrt-y': '#FDDB00',  // 環狀線
+            'mrt-a': '#8246AF',  // 機場捷運
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <!-- Custom CSS for Scrollbars & Animations -->
+  <style>
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: rgba(15, 23, 42, 0.6);
+    }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(51, 65, 85, 0.8);
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(71, 85, 105, 1);
+    }
+    
+    .pulse-dot {
+      animation: pulse-ring 1.5s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+    }
+    @keyframes pulse-ring {
+      0% { transform: scale(0.95); opacity: 0.8; }
+      50% { transform: scale(1.15); opacity: 0.4; }
+      100% { transform: scale(0.95); opacity: 0.8; }
+    }
+
+    .live-countdown {
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+
+    .stale-badge {
+      opacity: 0.75;
+    }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen font-sans flex flex-col antialiased selection:bg-indigo-500 selection:text-white">
+
+  <header class="sticky top-0 z-50 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 shadow-lg">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
+      <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+        
+        <!-- Logo & Title -->
+        <div class="flex items-center justify-between">
+          <div class="flex items-center space-x-3">
+            <div class="p-2.5 bg-gradient-to-tr from-indigo-600 to-violet-500 rounded-xl shadow-md text-white">
+              <i data-lucide="navigation" class="w-6 h-6"></i>
+            </div>
+            <div>
+              <h1 class="text-xl font-bold tracking-tight text-white flex items-center gap-2">
+                北北基桃 即時交通儀表板
+                <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                  TDX Live
+                </span>
+              </h1>
+              <p class="text-xs text-slate-400">大台北地區捷運 (全站點) · 台鐵 · 公車 動態資訊整合</p>
+            </div>
+          </div>
+
+          <!-- Mobile GPS status button -->
+          <div class="md:hidden flex items-center space-x-2">
+            <button id="btn-refresh-mobile" onclick="app.refreshAllData()" class="p-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 hover:text-white active:scale-95 transition">
+              <i data-lucide="rotate-cw" class="w-4 h-4" id="icon-refresh-mobile"></i>
+            </button>
+          </div>
+        </div>
+
+        <!-- Location Info & Timer Controls -->
+        <div class="flex flex-wrap items-center gap-2 text-xs">
+          <!-- Data Source Badge -->
+          <div id="data-source-badge" class="flex items-center space-x-1.5 px-3 py-1.5 bg-emerald-500/10 border border-emerald-500/30 rounded-lg text-emerald-300">
+            <span class="w-2 h-2 rounded-full bg-emerald-400" id="source-dot"></span>
+            <span id="source-text" class="font-medium">TDX 即時資訊</span>
+          </div>
+
+          <!-- Metro Network Map Modal Trigger Button -->
+          <button onclick="app.openMetroMapModal()" class="flex items-center space-x-1.5 px-3 py-1.5 bg-purple-600/30 hover:bg-purple-600/50 text-purple-300 border border-purple-500/40 rounded-lg text-xs font-medium transition cursor-pointer">
+            <i data-lucide="map" class="w-3.5 h-3.5"></i>
+            <span>全捷運站點名冊與地圖</span>
+          </button>
+
+          <!-- GPS Status Badge -->
+          <div id="gps-status-badge" class="flex items-center space-x-1.5 px-3 py-1.5 bg-slate-800/80 border border-slate-700/80 rounded-lg text-slate-300">
+            <span class="w-2 h-2 rounded-full bg-amber-400 pulse-dot" id="gps-dot"></span>
+            <span id="gps-status-text" class="font-medium">定位中...</span>
+          </div>
+
+          <!-- Location Lat/Lon or Hub -->
+          <div class="hidden sm:flex items-center space-x-1 px-3 py-1.5 bg-slate-800/80 border border-slate-700/80 rounded-lg text-slate-300">
+            <i data-lucide="map-pin" class="w-3.5 h-3.5 text-indigo-400"></i>
+            <span id="current-coords-text">--.----, --.----</span>
+          </div>
+
+          <!-- Auto-Refresh Counter -->
+          <div class="flex items-center space-x-1.5 px-3 py-1.5 bg-slate-800/80 border border-slate-700/80 rounded-lg text-slate-300">
+            <i data-lucide="timer" class="w-3.5 h-3.5 text-slate-400"></i>
+            <span>更新倒數: <strong id="timer-text" class="text-indigo-400 font-mono">20</strong>s</span>
+          </div>
+
+          <!-- Manual Refresh Button (Desktop) -->
+          <button id="btn-refresh-desktop" onclick="app.refreshAllData()" class="hidden md:flex items-center space-x-1.5 px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-medium shadow hover:shadow-indigo-500/20 active:scale-95 transition cursor-pointer">
+            <i data-lucide="rotate-cw" class="w-3.5 h-3.5" id="icon-refresh-desktop"></i>
+            <span>立即更新</span>
+          </button>
+        </div>
+
+      </div>
+    </div>
+  </header>
+
+  <section class="bg-slate-900/50 border-b border-slate-800/60 py-3">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+        
+        <!-- Quick Hub Buttons -->
+        <div class="flex items-center space-x-1 overflow-x-auto pb-1 sm:pb-0 no-scrollbar">
+          <span class="text-xs text-slate-400 font-medium px-2 flex items-center whitespace-nowrap">
+            <i data-lucide="compass" class="w-3.5 h-3.5 mr-1 text-slate-500"></i> 快速樞紐:
+          </span>
+          <button onclick="app.setManualLocation('GPS')" class="hub-btn px-2.5 py-1 rounded-md text-xs font-medium bg-indigo-600/30 text-indigo-300 border border-indigo-500/40 hover:bg-indigo-600/50 transition whitespace-nowrap">
+            🎯 我的位置
+          </button>
+          <button onclick="app.setManualLocation('台北車站', 25.0478, 121.5170)" class="hub-btn px-2.5 py-1 rounded-md text-xs font-medium bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white transition whitespace-nowrap">
+            🚆 台北車站
+          </button>
+          <button onclick="app.setManualLocation('板橋車站', 25.0143, 121.4638)" class="hub-btn px-2.5 py-1 rounded-md text-xs font-medium bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white transition whitespace-nowrap">
+            🚉 板橋車站
+          </button>
+          <button onclick="app.setManualLocation('市政府站', 25.0412, 121.5652)" class="hub-btn px-2.5 py-1 rounded-md text-xs font-medium bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white transition whitespace-nowrap">
+            🏙️ 市政府
+          </button>
+          <button onclick="app.setManualLocation('南港車站', 25.0531, 121.6071)" class="hub-btn px-2.5 py-1 rounded-md text-xs font-medium bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white transition whitespace-nowrap">
+            🚄 南港車站
+          </button>
+          <button onclick="app.setManualLocation('桃園機場T1', 25.0817, 121.2396)" class="hub-btn px-2.5 py-1 rounded-md text-xs font-medium bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white transition whitespace-nowrap">
+            ✈️ 桃機一航
+          </button>
+          <button onclick="app.setManualLocation('基隆車站', 25.1312, 121.7397)" class="hub-btn px-2.5 py-1 rounded-md text-xs font-medium bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white transition whitespace-nowrap">
+            ⚓ 基隆車站
+          </button>
+        </div>
+
+        <!-- System Alert / Toast Area -->
+        <div id="toast-message" class="hidden text-xs px-3 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-300 items-center space-x-1.5">
+          <i data-lucide="alert-circle" class="w-3.5 h-3.5"></i>
+          <span id="toast-text">載入中...</span>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <main class="flex-grow max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+
+    <!-- Section 1: Metro (捷運 TRTC & TYMC) -->
+    <section class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 border-b border-slate-800/80 pb-3">
+        <div class="flex items-center space-x-2">
+          <div class="p-2 bg-emerald-500/10 border border-emerald-500/20 rounded-lg text-emerald-400">
+            <i data-lucide="subway" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <h2 class="text-lg font-bold text-white flex items-center gap-2">
+              捷運即時到站 (Taipei Metro & Airport MRT)
+            </h2>
+            <p class="text-xs text-slate-400">包含全線 140+ 個捷運與機捷車站即時列車資訊</p>
+          </div>
+        </div>
+        
+        <div class="flex items-center space-x-2">
+          <button onclick="app.openMetroMapModal()" class="px-2.5 py-1 bg-purple-500/20 text-purple-300 border border-purple-500/30 hover:bg-purple-500/30 rounded-lg text-xs flex items-center gap-1 font-medium transition cursor-pointer">
+            <i data-lucide="map-pin" class="w-3.5 h-3.5"></i> 完整車站名冊
+          </button>
+          <span id="mrt-count" class="text-xs bg-slate-800 text-slate-400 border border-slate-700 px-2.5 py-1 rounded-full whitespace-nowrap">
+            搜尋中...
+          </span>
+        </div>
+      </div>
+
+      <!-- Line Filter Bar & Search Input -->
+      <div class="flex flex-col md:flex-row gap-3 mb-4 items-stretch md:items-center justify-between">
+        <div class="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0 no-scrollbar text-xs">
+          <span class="text-slate-400 font-medium whitespace-nowrap">路線篩選:</span>
+          <button onclick="app.filterMRTByLine('ALL')" class="mrt-line-filter px-2.5 py-1 rounded-md bg-indigo-600 text-white font-bold border border-indigo-500 hover:bg-indigo-500 transition cursor-pointer" data-line="ALL">全部 (顯示最近)</button>
+          <button onclick="app.filterMRTByLine('BL')" class="mrt-line-filter px-2.5 py-1 rounded-md bg-blue-900/40 text-blue-300 border border-blue-700/50 hover:bg-blue-800/60 transition cursor-pointer" data-line="BL">板南線 (BL)</button>
+          <button onclick="app.filterMRTByLine('R')" class="mrt-line-filter px-2.5 py-1 rounded-md bg-red-900/40 text-red-300 border border-red-700/50 hover:bg-red-800/60 transition cursor-pointer" data-line="R">淡水信義 (R)</button>
+          <button onclick="app.filterMRTByLine('G')" class="mrt-line-filter px-2.5 py-1 rounded-md bg-emerald-900/40 text-emerald-300 border border-emerald-700/50 hover:bg-emerald-800/60 transition cursor-pointer" data-line="G">松山新店 (G)</button>
+          <button onclick="app.filterMRTByLine('O')" class="mrt-line-filter px-2.5 py-1 rounded-md bg-amber-900/40 text-amber-300 border border-amber-700/50 hover:bg-amber-800/60 transition cursor-pointer" data-line="O">中和新蘆 (O)</button>
+          <button onclick="app.filterMRTByLine('BR')" class="mrt-line-filter px-2.5 py-1 rounded-md bg-yellow-900/40 text-yellow-300 border border-yellow-700/50 hover:bg-yellow-800/60 transition cursor-pointer" data-line="BR">文湖線 (BR)</button>
+          <button onclick="app.filterMRTByLine('Y')" class="mrt-line-filter px-2.5 py-1 rounded-md bg-amber-800/40 text-amber-200 border border-amber-600/50 hover:bg-amber-700/60 transition cursor-pointer" data-line="Y">環狀線 (Y)</button>
+          <button onclick="app.filterMRTByLine('A')" class="mrt-line-filter px-2.5 py-1 rounded-md bg-purple-900/40 text-purple-300 border border-purple-700/50 hover:bg-purple-800/60 transition cursor-pointer" data-line="A">機場捷運 (A)</button>
+        </div>
+
+        <div class="relative min-w-[240px]">
+          <input type="text" id="mrt-search-input" oninput="app.handleMRTSearch(this.value)" placeholder="搜尋站名（例如：頂溪、象山、A12）..." class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 pl-8 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition" />
+          <i data-lucide="search" class="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-2.5"></i>
+        </div>
+      </div>
+
+      <!-- Metro Cards Grid -->
+      <div id="mrt-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div class="animate-pulse bg-slate-800/50 border border-slate-700/50 rounded-xl p-4 h-40"></div>
+        <div class="animate-pulse bg-slate-800/50 border border-slate-700/50 rounded-xl p-4 h-40"></div>
+        <div class="animate-pulse bg-slate-800/50 border border-slate-700/50 rounded-xl p-4 h-40"></div>
+      </div>
+    </section>
+
+    <!-- TRA Board Section -->
+    <section class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl">
+      <div class="flex items-center justify-between mb-4 border-b border-slate-800/80 pb-3">
+        <div class="flex items-center space-x-2">
+          <div class="p-2 bg-blue-500/10 border border-blue-500/20 rounded-lg text-blue-400">
+            <i data-lucide="train" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <h2 class="text-lg font-bold text-white flex items-center gap-2">
+              台鐵列車即時看板 (TRA Live Board)
+            </h2>
+            <p class="text-xs text-slate-400" id="tra-station-title">搜尋最近台鐵車站...</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- TRA Columns: Northbound & Southbound -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        
+        <!-- Direction 0: 北上 Northbound -->
+        <div class="bg-slate-950/60 border border-slate-800 rounded-xl p-4">
+          <div class="flex items-center justify-between mb-3 border-b border-slate-800/80 pb-2">
+            <span class="text-sm font-semibold text-slate-200 flex items-center gap-1.5">
+              <i data-lucide="arrow-up-right" class="w-4 h-4 text-sky-400"></i> 北上 / 逆行 (Northbound)
+            </span>
+            <span class="text-xs text-slate-400">未來 5 班 · 表定＋剩餘秒數＋誤點</span>
+          </div>
+          <div id="tra-northbound-list" class="space-y-2">
+            <div class="animate-pulse bg-slate-800/40 rounded-lg h-12"></div>
+            <div class="animate-pulse bg-slate-800/40 rounded-lg h-12"></div>
+          </div>
+        </div>
+
+        <!-- Direction 1: 南下 Southbound -->
+        <div class="bg-slate-950/60 border border-slate-800 rounded-xl p-4">
+          <div class="flex items-center justify-between mb-3 border-b border-slate-800/80 pb-2">
+            <span class="text-sm font-semibold text-slate-200 flex items-center gap-1.5">
+              <i data-lucide="arrow-down-right" class="w-4 h-4 text-emerald-400"></i> 南下 / 順行 (Southbound)
+            </span>
+            <span class="text-xs text-slate-400">未來 5 班 · 表定＋剩餘秒數＋誤點</span>
+          </div>
+          <div id="tra-southbound-list" class="space-y-2">
+            <div class="animate-pulse bg-slate-800/40 rounded-lg h-12"></div>
+            <div class="animate-pulse bg-slate-800/40 rounded-lg h-12"></div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- Bus Section -->
+    <section class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl">
+      <div class="flex items-center justify-between mb-4 border-b border-slate-800/80 pb-3">
+        <div class="flex items-center space-x-2">
+          <div class="p-2 bg-amber-500/10 border border-amber-500/20 rounded-lg text-amber-400">
+            <i data-lucide="bus" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <h2 class="text-lg font-bold text-white flex items-center gap-2">
+              周邊市區公車即時預估 (Bus Nearby Realtime)
+            </h2>
+            <p class="text-xs text-slate-400">雙北 · 基隆 · 桃園 市區公車</p>
+          </div>
+        </div>
+        <span id="bus-stop-count" class="text-xs bg-slate-800 text-slate-400 border border-slate-700 px-2.5 py-1 rounded-full">
+          搜尋中...
+        </span>
+      </div>
+
+      <!-- Bus Stops Grid -->
+      <div id="bus-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div class="animate-pulse bg-slate-800/50 border border-slate-700/50 rounded-xl p-4 h-44"></div>
+        <div class="animate-pulse bg-slate-800/50 border border-slate-700/50 rounded-xl p-4 h-44"></div>
+        <div class="animate-pulse bg-slate-800/50 border border-slate-700/50 rounded-xl p-4 h-44"></div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Modal -->
+  <div id="metro-map-modal" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md hidden flex items-center justify-center p-4 transition-opacity">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-5xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
+      
+      <!-- Modal Header -->
+      <div class="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-900/90">
+        <div class="flex items-center space-x-3">
+          <div class="p-2 bg-purple-500/10 border border-purple-500/20 rounded-xl text-purple-400">
+            <i data-lucide="map" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <h3 class="text-base font-bold text-white flex items-center gap-2">
+              捷運全線完整車站名冊 (Full Station Directory)
+            </h3>
+            <p class="text-xs text-slate-400">包含北捷 (TRTC) 及 桃捷 (TYMC) 全部 140+ 個營運車站，點擊即可切換至該站</p>
+          </div>
+        </div>
+        <button onclick="app.closeMetroMapModal()" class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition cursor-pointer">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <!-- Modal Content Body -->
+      <div class="p-6 overflow-y-auto space-y-6 flex-grow">
+        
+        <!-- Official External Links Box -->
+        <div class="bg-slate-950/80 border border-slate-800 rounded-xl p-4">
+          <h4 class="text-xs font-semibold text-slate-300 mb-3 flex items-center gap-1.5">
+            <i data-lucide="external-link" class="w-4 h-4 text-indigo-400"></i>
+            官方高解析度路網圖連結 (Official Metro Route Maps)
+          </h4>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <a href="https://www.metro.taipei/cp.aspx?n=73B51F32ED23C5E1" target="_blank" rel="noopener noreferrer" class="flex items-center justify-between p-3 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-xs transition group">
+              <div class="flex items-center space-x-3">
+                <span class="p-2 bg-indigo-500/10 text-indigo-400 rounded-md">🚆</span>
+                <div>
+                  <div class="font-bold text-slate-200 group-hover:text-indigo-300">台北捷運官方路網圖 (TRTC Map)</div>
+                  <div class="text-[11px] text-slate-400">開啟台北捷運公司中文/英文全區路線圖</div>
+                </div>
+              </div>
+              <i data-lucide="arrow-up-right" class="w-4 h-4 text-slate-500 group-hover:text-indigo-400 transition"></i>
+            </a>
+
+            <a href="https://dorts.tycg.gov.tw/cp.aspx?n=23131" target="_blank" rel="noopener noreferrer" class="flex items-center justify-between p-3 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-xs transition group">
+              <div class="flex items-center space-x-3">
+                <span class="p-2 bg-purple-500/10 text-purple-400 rounded-md">✈️</span>
+                <div>
+                  <div class="font-bold text-slate-200 group-hover:text-purple-300">桃園捷運路網導覽圖 (TYMC Map)</div>
+                  <div class="text-[11px] text-slate-400">桃園捷運工程局路網與機場捷運說明</div>
+                </div>
+              </div>
+              <i data-lucide="arrow-up-right" class="w-4 h-4 text-slate-500 group-hover:text-purple-400 transition"></i>
+            </a>
+          </div>
+        </div>
+
+        <!-- Full Station Directory by Line -->
+        <div class="bg-slate-950/80 border border-slate-800 rounded-xl p-4">
+          <h4 class="text-xs font-semibold text-slate-300 mb-3 flex items-center gap-1.5">
+            <i data-lucide="list" class="w-4 h-4 text-amber-400"></i>
+            各路線完整車站點擊總覽 (點擊車站即刻定位)
+          </h4>
+          <div id="modal-station-directory" class="space-y-4 text-xs">
+            <!-- Dynamically Rendered by JS -->
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Modal Footer -->
+      <div class="px-6 py-3 border-t border-slate-800 bg-slate-900/90 text-right">
+        <button onclick="app.closeMetroMapModal()" class="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs transition cursor-pointer">
+          關閉 (Close)
+        </button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <footer class="bg-slate-900 border-t border-slate-800 py-6 mt-12 text-center text-xs text-slate-500">
+    <div class="max-w-7xl mx-auto px-4 space-y-2">
+      <p>資料來源：交通部 TDX 運輸資料流通服務 (Taiwan Transport Data eXpress)</p>
+      <p class="text-slate-600">本系統專為大台北 (雙北/基隆/桃園) 交通動態設計 · 自動更新週期：20 秒</p>
+    </div>
+  </footer>
+
+  <script>
+    const TDX_CONFIG = {
+      clientId: "102404057-261d1f84-3e2a-455f",
+      clientSecret: "b25c1716-8480-44af-8503-90b73cdc0541",
+      tokenUrl: "https://tdx.transportdata.tw/auth/realms/TDXConnect/protocol/openid-connect/token",
+      baseUrl: "https://tdx.transportdata.tw/api/basic",
+      advancedBaseUrl: "https://tdx.transportdata.tw/api/advanced"
+    };
+
+    class TDXAuthManager {
+      constructor() {
+        this.accessToken = null;
+        this.tokenExpiresAt = 0;
+        this.isDemoMode = false;
+        this.authRetryAfter = 0;
+        this.lastAuthError = null;
+        this.authRetryMs = 15000;
+      }
+
+      async getToken(force = false) {
+        const now = Date.now();
+        if (this.accessToken && this.tokenExpiresAt > now + 60000 && !force) {
+          return this.accessToken;
+        }
+        // Never lock the whole dashboard into demo mode after one transient failure.
+        if (!force && now < this.authRetryAfter) return null;
+
+        try {
+          const bodyData = new URLSearchParams({
+            grant_type: 'client_credentials',
+            client_id: TDX_CONFIG.clientId,
+            client_secret: TDX_CONFIG.clientSecret
+          });
+
+          const response = await fetch(TDX_CONFIG.tokenUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: bodyData
+          });
+
+          if (!response.ok) {
+            const body = await response.text().catch(() => '');
+            throw new Error(`Auth failed HTTP ${response.status}${body ? `: ${body.slice(0,120)}` : ''}`);
+          }
+
+          const data = await response.json();
+          if (!data.access_token) throw new Error('TDX token response missing access_token');
+          this.accessToken = data.access_token;
+          this.tokenExpiresAt = Date.now() + (Number(data.expires_in || 1800) * 1000);
+          this.isDemoMode = false;
+          this.authRetryAfter = 0;
+          this.lastAuthError = null;
+          this.updateSourceBadge(false);
+          return this.accessToken;
+        } catch (err) {
+          this.accessToken = null;
+          this.tokenExpiresAt = 0;
+          this.isDemoMode = false;
+          this.authRetryAfter = Date.now() + this.authRetryMs;
+          this.lastAuthError = err;
+          console.warn('TDX authentication failed; will retry automatically.', err.message);
+          this.updateSourceBadge(true);
+          return null;
+        }
+      }
+
+      async fetchAPI(url, { retry401 = true } = {}) {
+        const token = await this.getToken();
+        if (!token) throw new Error(this.lastAuthError ? `TDX 認證失敗：${this.lastAuthError.message}` : 'TDX 尚未取得 Access Token');
+
+        const doFetch = async (bearer) => {
+          const headers = { 'Accept': 'application/json', 'Authorization': `Bearer ${bearer}` };
+          return fetch(url, { headers });
+        };
+
+        let response = await doFetch(token);
+        if (response.status === 401 && retry401) {
+          const refreshed = await this.getToken(true);
+          if (!refreshed) throw new Error('TDX Access Token 已失效且重新取得失敗');
+          response = await doFetch(refreshed);
+        }
+
+        if (!response.ok) {
+          const body = await response.text().catch(() => '');
+          throw new Error(`HTTP ${response.status}${body ? `: ${body.slice(0,120)}` : ''}`);
+        }
+        return await response.json();
+      }
+
+      updateSourceBadge(isDemo) {
+        const sourceDot = document.getElementById('source-dot');
+        const sourceText = document.getElementById('source-text');
+        const sourceBadge = document.getElementById('data-source-badge');
+        if (!sourceDot || !sourceText) return;
+
+        if (isDemo) {
+          sourceDot.className = 'w-2 h-2 rounded-full bg-amber-400';
+          sourceText.innerText = 'TDX API 暫時異常 / 自動重試';
+          if (sourceBadge) sourceBadge.className = 'flex items-center space-x-1.5 px-3 py-1.5 bg-amber-500/10 border border-amber-500/30 rounded-lg text-amber-300';
+        } else {
+          sourceDot.className = 'w-2 h-2 rounded-full bg-emerald-400';
+          sourceText.innerText = 'TDX 即時資訊';
+          if (sourceBadge) sourceBadge.className = 'flex items-center space-x-1.5 px-3 py-1.5 bg-emerald-500/10 border border-emerald-500/30 rounded-lg text-emerald-300';
+        }
+      }
+    }
+
+    const tdxAuth = new TDXAuthManager();
+
+    // FULL OFFICIAL METRO STATIONS DATABASE (ALL 140+ STATIONS)
+    const OFFLINE_STATIONS = {
+      mrt: [
+        // 板南線 (BL01 ~ BL23)
+        { id: "BL01", name: "頂埔", line: "BL", lineName: "板南線", lat: 24.9601, lon: 121.4206, dests: ["南港展覽館"] },
+        { id: "BL02", name: "永寧", line: "BL", lineName: "板南線", lat: 24.9668, lon: 121.4361, dests: ["頂埔", "南港展覽館"] },
+        { id: "BL03", name: "土城", line: "BL", lineName: "板南線", lat: 24.9732, lon: 121.4443, dests: ["頂埔", "南港展覽館"] },
+        { id: "BL04", name: "海山", line: "BL", lineName: "板南線", lat: 24.9853, lon: 121.4488, dests: ["頂埔", "南港展覽館"] },
+        { id: "BL05", name: "亞東醫院", line: "BL", lineName: "板南線", lat: 24.9982, lon: 121.4525, dests: ["頂埔", "南港展覽館"] },
+        { id: "BL06", name: "府中", line: "BL", lineName: "板南線", lat: 25.0086, lon: 121.4590, dests: ["頂埔", "南港展覽館"] },
+        { id: "BL07", name: "板橋", line: "BL", lineName: "板南線", lat: 25.0143, lon: 121.4638, dests: ["頂埔", "南港展覽館"] },
+        { id: "BL08", name: "新埔", line: "BL", lineName: "板南線", lat: 25.0237, lon: 121.4684, dests: ["頂埔", "南港展覽館"] },
+        { id: "BL09", name: "江子翠", line: "BL", lineName: "板南線", lat: 25.0300, lon: 121.4725, dests: ["頂埔", "南港展覽館"] },
+        { id: "BL10", name: "龍山寺", line: "BL", lineName: "板南線", lat: 25.0363, lon: 121.4999, dests: ["頂埔", "南港展覽館"] },
+        { id: "BL11", name: "西門", line: "BL", lineName: "板南線", lat: 25.0422, lon: 121.5080, dests: ["頂埔", "南港展覽館"] },
+        { id: "BL12", name: "台北車站", line: "BL", lineName: "板南線", lat: 25.0478, lon: 121.5170, dests: ["頂埔", "南港展覽館"] },
+        { id: "BL13", name: "善導寺", line: "BL", lineName: "板南線", lat: 25.0448, lon: 121.5233, dests: ["頂埔", "南港展覽館"] },
+        { id: "BL14", name: "忠孝新生", line: "BL", lineName: "板南線", lat: 25.0423, lon: 121.5330, dests: ["頂埔", "南港展覽館"] },
+        { id: "BL15", name: "忠孝復興", line: "BL", lineName: "板南線", lat: 25.0415, lon: 121.5441, dests: ["頂埔", "南港展覽館"] },
+        { id: "BL16", name: "忠孝敦化", line: "BL", lineName: "板南線", lat: 25.0414, lon: 121.5511, dests: ["頂埔", "南港展覽館"] },
+        { id: "BL17", name: "國父紀念館", line: "BL", lineName: "板南線", lat: 25.0413, lon: 121.5578, dests: ["頂埔", "南港展覽館"] },
+        { id: "BL18", name: "市政府", line: "BL", lineName: "板南線", lat: 25.0412, lon: 121.5652, dests: ["頂埔", "南港展覽館"] },
+        { id: "BL19", name: "永春", line: "BL", lineName: "板南線", lat: 25.0407, lon: 121.5763, dests: ["頂埔", "南港展覽館"] },
+        { id: "BL20", name: "後山埤", line: "BL", lineName: "板南線", lat: 25.0450, lon: 121.5826, dests: ["頂埔", "南港展覽館"] },
+        { id: "BL21", name: "昆陽", line: "BL", lineName: "板南線", lat: 25.0505, lon: 121.5933, dests: ["頂埔", "南港展覽館"] },
+        { id: "BL22", name: "南港", line: "BL", lineName: "板南線", lat: 25.0531, lon: 121.6071, dests: ["頂埔", "南港展覽館"] },
+        { id: "BL23", name: "南港展覽館", line: "BL", lineName: "板南線", lat: 25.0553, lon: 121.6175, dests: ["頂埔"] },
+
+        // 淡水信義線 (R02 ~ R28)
+        { id: "R02", name: "象山", line: "R", lineName: "淡水信義線", lat: 25.0329, lon: 121.5702, dests: ["淡水", "北投"] },
+        { id: "R03", name: "台北101/世貿", line: "R", lineName: "淡水信義線", lat: 25.0330, lon: 121.5636, dests: ["淡水", "象山"] },
+        { id: "R04", name: "信義安和", line: "R", lineName: "淡水信義線", lat: 25.0333, lon: 121.5532, dests: ["淡水", "象山"] },
+        { id: "R05", name: "大安", line: "R", lineName: "淡水信義線", lat: 25.0329, lon: 121.5435, dests: ["淡水", "象山"] },
+        { id: "R06", name: "大安森林公園", line: "R", lineName: "淡水信義線", lat: 25.0333, lon: 121.5350, dests: ["淡水", "象山"] },
+        { id: "R07", name: "東門", line: "R", lineName: "淡水信義線", lat: 25.0338, lon: 121.5283, dests: ["淡水", "象山"] },
+        { id: "R08", name: "中正紀念堂", line: "R", lineName: "淡水信義線", lat: 25.0354, lon: 121.5181, dests: ["淡水", "象山"] },
+        { id: "R09", name: "台大醫院", line: "R", lineName: "淡水信義線", lat: 25.0413, lon: 121.5162, dests: ["淡水", "象山"] },
+        { id: "R10", name: "台北車站", line: "R", lineName: "淡水信義線", lat: 25.0478, lon: 121.5170, dests: ["淡水", "象山"] },
+        { id: "R11", name: "中山", line: "R", lineName: "淡水信義線", lat: 25.0527, lon: 121.5204, dests: ["淡水", "象山"] },
+        { id: "R12", name: "雙連", line: "R", lineName: "淡水信義線", lat: 25.0578, lon: 121.5207, dests: ["淡水", "象山"] },
+        { id: "R13", name: "民權西路", line: "R", lineName: "淡水信義線", lat: 25.0630, lon: 121.5196, dests: ["淡水", "象山"] },
+        { id: "R14", name: "圓山", line: "R", lineName: "淡水信義線", lat: 25.0712, lon: 121.5201, dests: ["淡水", "象山"] },
+        { id: "R15", name: "劍潭", line: "R", lineName: "淡水信義線", lat: 25.0848, lon: 121.5250, dests: ["淡水", "象山"] },
+        { id: "R16", name: "士林", line: "R", lineName: "淡水信義線", lat: 25.0933, lon: 121.5263, dests: ["淡水", "象山"] },
+        { id: "R17", name: "芝山", line: "R", lineName: "淡水信義線", lat: 25.1028, lon: 121.5225, dests: ["淡水", "象山"] },
+        { id: "R18", name: "明德", line: "R", lineName: "淡水信義線", lat: 25.1098, lon: 121.5186, dests: ["淡水", "象山"] },
+        { id: "R19", name: "石牌", line: "R", lineName: "淡水信義線", lat: 25.1147, lon: 121.5154, dests: ["淡水", "象山"] },
+        { id: "R20", name: "唭哩岸", line: "R", lineName: "淡水信義線", lat: 25.1208, lon: 121.5063, dests: ["淡水", "象山"] },
+        { id: "R21", name: "奇岩", line: "R", lineName: "淡水信義線", lat: 25.1258, lon: 121.5011, dests: ["淡水", "象山"] },
+        { id: "R22", name: "北投", line: "R", lineName: "淡水信義線", lat: 25.1318, lon: 121.4987, dests: ["淡水", "象山", "新北投"] },
+        { id: "R22A", name: "新北投", line: "R", lineName: "淡水信義線", lat: 25.1369, lon: 121.5064, dests: ["北投"] },
+        { id: "R23", name: "復興崗", line: "R", lineName: "淡水信義線", lat: 25.1375, lon: 121.4856, dests: ["淡水", "象山"] },
+        { id: "R24", name: "忠義", line: "R", lineName: "淡水信義線", lat: 25.1309, lon: 121.4732, dests: ["淡水", "象山"] },
+        { id: "R25", name: "關渡", line: "R", lineName: "淡水信義線", lat: 25.1256, lon: 121.4671, dests: ["淡水", "象山"] },
+        { id: "R26", name: "竹圍", line: "R", lineName: "淡水信義線", lat: 25.1368, lon: 121.4593, dests: ["淡水", "象山"] },
+        { id: "R27", name: "紅樹林", line: "R", lineName: "淡水信義線", lat: 25.1540, lon: 121.4589, dests: ["淡水", "象山"] },
+        { id: "R28", name: "淡水", line: "R", lineName: "淡水信義線", lat: 25.1678, lon: 121.4456, dests: ["象山"] },
+
+        // 松山新店線 (G01 ~ G19)
+        { id: "G01", name: "新店", line: "G", lineName: "松山新店線", lat: 24.9579, lon: 121.5377, dests: ["松山"] },
+        { id: "G02", name: "新店區公所", line: "G", lineName: "松山新店線", lat: 24.9673, lon: 121.5416, dests: ["松山", "新店"] },
+        { id: "G03", name: "七張", line: "G", lineName: "松山新店線", lat: 24.9753, lon: 121.5432, dests: ["松山", "新店", "小碧潭"] },
+        { id: "G03A", name: "小碧潭", line: "G", lineName: "松山新店線", lat: 24.9712, lon: 121.5303, dests: ["七張"] },
+        { id: "G04", name: "大坪林", line: "G", lineName: "松山新店線", lat: 24.9828, lon: 121.5414, dests: ["松山", "新店"] },
+        { id: "G05", name: "景美", line: "G", lineName: "松山新店線", lat: 24.9932, lon: 121.5406, dests: ["松山", "新店"] },
+        { id: "G06", name: "萬隆", line: "G", lineName: "松山新店線", lat: 25.0020, lon: 121.5392, dests: ["松山", "新店"] },
+        { id: "G07", name: "公館", line: "G", lineName: "松山新店線", lat: 25.0136, lon: 121.5342, dests: ["松山", "新店"] },
+        { id: "G08", name: "台電大樓", line: "G", lineName: "松山新店線", lat: 25.0207, lon: 121.5282, dests: ["松山", "新店"] },
+        { id: "G09", name: "古亭", line: "G", lineName: "松山新店線", lat: 25.0263, lon: 121.5229, dests: ["松山", "新店"] },
+        { id: "G10", name: "中正紀念堂", line: "G", lineName: "松山新店線", lat: 25.0354, lon: 121.5181, dests: ["松山", "新店"] },
+        { id: "G11", name: "小南門", line: "G", lineName: "松山新店線", lat: 25.0356, lon: 121.5090, dests: ["松山", "新店"] },
+        { id: "G12", name: "西門", line: "G", lineName: "松山新店線", lat: 25.0422, lon: 121.5080, dests: ["松山", "新店"] },
+        { id: "G13", name: "北門", line: "G", lineName: "松山新店線", lat: 25.0493, lon: 121.5101, dests: ["松山", "新店"] },
+        { id: "G14", name: "中山", line: "G", lineName: "松山新店線", lat: 25.0527, lon: 121.5204, dests: ["松山", "新店"] },
+        { id: "G15", name: "松江南京", line: "G", lineName: "松山新店線", lat: 25.0519, lon: 121.5332, dests: ["松山", "新店"] },
+        { id: "G16", name: "南京復興", line: "G", lineName: "松山新店線", lat: 25.0519, lon: 121.5447, dests: ["松山", "新店"] },
+        { id: "G17", name: "台北小巨蛋", line: "G", lineName: "松山新店線", lat: 25.0518, lon: 121.5555, dests: ["松山", "新店"] },
+        { id: "G18", name: "南京三民", line: "G", lineName: "松山新店線", lat: 25.0512, lon: 121.5658, dests: ["松山", "新店"] },
+        { id: "G19", name: "松山", line: "G", lineName: "松山新店線", lat: 25.0496, lon: 121.5781, dests: ["新店"] },
+
+        // 中和新蘆線 (O01 ~ O54)
+        { id: "O01", name: "南勢角", line: "O", lineName: "中和新蘆線", lat: 24.9902, lon: 121.5091, dests: ["迴龍", "蘆洲"] },
+        { id: "O02", name: "景安", line: "O", lineName: "中和新蘆線", lat: 24.9937, lon: 121.5050, dests: ["迴龍", "蘆洲", "南勢角"] },
+        { id: "O03", name: "永安市場", line: "O", lineName: "中和新蘆線", lat: 25.0028, lon: 121.5111, dests: ["迴龍", "蘆洲", "南勢角"] },
+        { id: "O04", name: "頂溪", line: "O", lineName: "中和新蘆線", lat: 25.0137, lon: 121.5154, dests: ["迴龍", "蘆洲", "南勢角"] },
+        { id: "O05", name: "古亭", line: "O", lineName: "中和新蘆線", lat: 25.0263, lon: 121.5229, dests: ["迴龍", "蘆洲", "南勢角"] },
+        { id: "O06", name: "東門", line: "O", lineName: "中和新蘆線", lat: 25.0338, lon: 121.5283, dests: ["迴龍", "蘆洲", "南勢角"] },
+        { id: "O07", name: "忠孝新生", line: "O", lineName: "中和新蘆線", lat: 25.0423, lon: 121.5330, dests: ["迴龍", "蘆洲", "南勢角"] },
+        { id: "O08", name: "松江南京", line: "O", lineName: "中和新蘆線", lat: 25.0519, lon: 121.5332, dests: ["迴龍", "蘆洲", "南勢角"] },
+        { id: "O09", name: "行天宮", line: "O", lineName: "中和新蘆線", lat: 25.0598, lon: 121.5330, dests: ["迴龍", "蘆洲", "南勢角"] },
+        { id: "O10", name: "中山國小", line: "O", lineName: "中和新蘆線", lat: 25.0632, lon: 121.5263, dests: ["迴龍", "蘆洲", "南勢角"] },
+        { id: "O11", name: "民權西路", line: "O", lineName: "中和新蘆線", lat: 25.0630, lon: 121.5196, dests: ["迴龍", "蘆洲", "南勢角"] },
+        { id: "O12", name: "大橋頭", line: "O", lineName: "中和新蘆線", lat: 25.0631, lon: 121.5127, dests: ["迴龍", "蘆洲", "南勢角"] },
+        { id: "O13", name: "台北橋", line: "O", lineName: "中和新蘆線", lat: 25.0632, lon: 121.4998, dests: ["迴龍", "南勢角"] },
+        { id: "O14", name: "菜寮", line: "O", lineName: "中和新蘆線", lat: 25.0608, lon: 121.4920, dests: ["迴龍", "南勢角"] },
+        { id: "O15", name: "三重", line: "O", lineName: "中和新蘆線", lat: 25.0556, lon: 121.4842, dests: ["迴龍", "南勢角"] },
+        { id: "O16", name: "先嗇宮", line: "O", lineName: "中和新蘆線", lat: 25.0465, lon: 121.4720, dests: ["迴龍", "南勢角"] },
+        { id: "O17", name: "頭前庄", line: "O", lineName: "中和新蘆線", lat: 25.0396, lon: 121.4613, dests: ["迴龍", "南勢角"] },
+        { id: "O18", name: "新莊", line: "O", lineName: "中和新蘆線", lat: 25.0360, lon: 121.4530, dests: ["迴龍", "南勢角"] },
+        { id: "O19", name: "輔大", line: "O", lineName: "中和新蘆線", lat: 25.0330, lon: 121.4358, dests: ["迴龍", "南勢角"] },
+        { id: "O20", name: "丹鳳", line: "O", lineName: "中和新蘆線", lat: 25.0286, lon: 121.4230, dests: ["迴龍", "南勢角"] },
+        { id: "O21", name: "迴龍", line: "O", lineName: "中和新蘆線", lat: 25.0211, lon: 121.4118, dests: ["南勢角"] },
+        { id: "O50", name: "三重國小", line: "O", lineName: "中和新蘆線", lat: 25.0698, lon: 121.4975, dests: ["蘆洲", "南勢角"] },
+        { id: "O51", name: "三和國中", line: "O", lineName: "中和新蘆線", lat: 25.0768, lon: 121.4883, dests: ["蘆洲", "南勢角"] },
+        { id: "O52", name: "徐匯中學", line: "O", lineName: "中和新蘆線", lat: 25.0805, lon: 121.4800, dests: ["蘆洲", "南勢角"] },
+        { id: "O53", name: "三民高中", line: "O", lineName: "中和新蘆線", lat: 25.0858, lon: 121.4730, dests: ["蘆洲", "南勢角"] },
+        { id: "O54", name: "蘆洲", line: "O", lineName: "中和新蘆線", lat: 25.0913, lon: 121.4646, dests: ["南勢角"] },
+
+        // 文湖線 (BR01 ~ BR24)
+        { id: "BR01", name: "動物園", line: "BR", lineName: "文湖線", lat: 24.9982, lon: 121.5793, dests: ["南港展覽館"] },
+        { id: "BR02", name: "木柵", line: "BR", lineName: "文湖線", lat: 24.9980, lon: 121.5732, dests: ["南港展覽館", "動物園"] },
+        { id: "BR03", name: "萬芳社區", line: "BR", lineName: "文湖線", lat: 24.9986, lon: 121.5683, dests: ["南港展覽館", "動物園"] },
+        { id: "BR04", name: "萬芳醫院", line: "BR", lineName: "文湖線", lat: 24.9994, lon: 121.5582, dests: ["南港展覽館", "動物園"] },
+        { id: "BR05", name: "辛亥", line: "BR", lineName: "文湖線", lat: 25.0055, lon: 121.5572, dests: ["南港展覽館", "動物園"] },
+        { id: "BR06", name: "麟光", line: "BR", lineName: "文湖線", lat: 25.0185, lon: 121.5588, dests: ["南港展覽館", "動物園"] },
+        { id: "BR07", name: "六張犁", line: "BR", lineName: "文湖線", lat: 25.0238, lon: 121.5530, dests: ["南港展覽館", "動物園"] },
+        { id: "BR08", name: "科技大樓", line: "BR", lineName: "文湖線", lat: 25.0261, lon: 121.5435, dests: ["南港展覽館", "動物園"] },
+        { id: "BR09", name: "大安", line: "BR", lineName: "文湖線", lat: 25.0329, lon: 121.5435, dests: ["南港展覽館", "動物園"] },
+        { id: "BR10", name: "忠孝復興", line: "BR", lineName: "文湖線", lat: 25.0415, lon: 121.5441, dests: ["南港展覽館", "動物園"] },
+        { id: "BR11", name: "南京復興", line: "BR", lineName: "文湖線", lat: 25.0519, lon: 121.5447, dests: ["南港展覽館", "動物園"] },
+        { id: "BR12", name: "中山國中", line: "BR", lineName: "文湖線", lat: 25.0608, lon: 121.5442, dests: ["南港展覽館", "動物園"] },
+        { id: "BR13", name: "松山機場", line: "BR", lineName: "文湖線", lat: 25.0631, lon: 121.5516, dests: ["南港展覽館", "動物園"] },
+        { id: "BR14", name: "大直", line: "BR", lineName: "文湖線", lat: 25.0795, lon: 121.5469, dests: ["南港展覽館", "動物園"] },
+        { id: "BR15", name: "劍南路", line: "BR", lineName: "文湖線", lat: 25.0848, lon: 121.5556, dests: ["南港展覽館", "動物園"] },
+        { id: "BR16", name: "西湖", line: "BR", lineName: "文湖線", lat: 25.0821, lon: 121.5670, dests: ["南港展覽館", "動物園"] },
+        { id: "BR17", name: "港墘", line: "BR", lineName: "文湖線", lat: 25.0800, lon: 121.5752, dests: ["南港展覽館", "動物園"] },
+        { id: "BR18", name: "文德", line: "BR", lineName: "文湖線", lat: 25.0785, lon: 121.5847, dests: ["南港展覽館", "動物園"] },
+        { id: "BR19", name: "內湖", line: "BR", lineName: "文湖線", lat: 25.0836, lon: 121.5941, dests: ["南港展覽館", "動物園"] },
+        { id: "BR20", name: "大湖公園", line: "BR", lineName: "文湖線", lat: 25.0840, lon: 121.6027, dests: ["南港展覽館", "動物園"] },
+        { id: "BR21", name: "葫洲", line: "BR", lineName: "文湖線", lat: 25.0728, lon: 121.6084, dests: ["南港展覽館", "動物園"] },
+        { id: "BR22", name: "東湖", line: "BR", lineName: "文湖線", lat: 25.0672, lon: 121.6114, dests: ["南港展覽館", "動物園"] },
+        { id: "BR23", name: "南港軟體園區", line: "BR", lineName: "文湖線", lat: 25.0599, lon: 121.6159, dests: ["南港展覽館", "動物園"] },
+        { id: "BR24", name: "南港展覽館", line: "BR", lineName: "文湖線", lat: 25.0553, lon: 121.6175, dests: ["動物園"] },
+
+        // 環狀線 (Y07 ~ Y20)
+        { id: "Y07", name: "大坪林", line: "Y", lineName: "環狀線", lat: 24.9828, lon: 121.5414, dests: ["新北產業園區"] },
+        { id: "Y08", name: "十四張", line: "Y", lineName: "環狀線", lat: 24.9860, lon: 121.5300, dests: ["新北產業園區", "大坪林"] },
+        { id: "Y09", name: "秀朗橋", line: "Y", lineName: "環狀線", lat: 24.9912, lon: 121.5235, dests: ["新北產業園區", "大坪林"] },
+        { id: "Y10", name: "景平", line: "Y", lineName: "環狀線", lat: 24.9936, lon: 121.5150, dests: ["新北產業園區", "大坪林"] },
+        { id: "Y11", name: "景安", line: "Y", lineName: "環狀線", lat: 24.9937, lon: 121.5050, dests: ["新北產業園區", "大坪林"] },
+        { id: "Y12", name: "中和", line: "Y", lineName: "環狀線", lat: 24.9980, lon: 121.4932, dests: ["新北產業園區", "大坪林"] },
+        { id: "Y13", name: "橋和", line: "Y", lineName: "環狀線", lat: 25.0042, lon: 121.4880, dests: ["新北產業園區", "大坪林"] },
+        { id: "Y14", name: "中原", line: "Y", lineName: "環狀線", lat: 25.0080, lon: 121.4830, dests: ["新北產業園區", "大坪林"] },
+        { id: "Y15", name: "板新", line: "Y", lineName: "環狀線", lat: 25.0130, lon: 121.4722, dests: ["新北產業園區", "大坪林"] },
+        { id: "Y16", name: "板橋", line: "Y", lineName: "環狀線", lat: 25.0143, lon: 121.4638, dests: ["新北產業園區", "大坪林"] },
+        { id: "Y17", name: "新埔民生", line: "Y", lineName: "環狀線", lat: 25.0260, lon: 121.4660, dests: ["新北產業園區", "大坪林"] },
+        { id: "Y18", name: "頭前庄", line: "Y", lineName: "環狀線", lat: 25.0396, lon: 121.4613, dests: ["新北產業園區", "大坪林"] },
+        { id: "Y19", name: "幸福", line: "Y", lineName: "環狀線", lat: 25.0501, lon: 121.4600, dests: ["新北產業園區", "大坪林"] },
+        { id: "Y20", name: "新北產業園區", line: "Y", lineName: "環狀線", lat: 25.0616, lon: 121.4597, dests: ["大坪林"] },
+
+        // 機場捷運 (A1 ~ A22)
+        { id: "A1", name: "台北車站", line: "A", lineName: "機場捷運", lat: 25.0491, lon: 121.5135, dests: ["桃園機場", "老街溪"] },
+        { id: "A2", name: "三重", line: "A", lineName: "機場捷運", lat: 25.0556, lon: 121.4842, dests: ["台北車站", "老街溪"] },
+        { id: "A3", name: "新北產業園區", line: "A", lineName: "機場捷運", lat: 25.0616, lon: 121.4597, dests: ["台北車站", "桃園機場"] },
+        { id: "A4", name: "新莊副都心", line: "A", lineName: "機場捷運", lat: 25.0588, lon: 121.4480, dests: ["台北車站", "老街溪"] },
+        { id: "A5", name: "泰山", line: "A", lineName: "機場捷運", lat: 25.0538, lon: 121.4385, dests: ["台北車站", "老街溪"] },
+        { id: "A6", name: "泰山貴和", line: "A", lineName: "機場捷運", lat: 25.0350, lon: 121.4240, dests: ["台北車站", "老街溪"] },
+        { id: "A7", name: "體育大學", line: "A", lineName: "機場捷運", lat: 25.0380, lon: 121.3890, dests: ["台北車站", "老街溪"] },
+        { id: "A8", name: "長庚醫院", line: "A", lineName: "機場捷運", lat: 25.0598, lon: 121.3697, dests: ["台北車站", "桃園機場"] },
+        { id: "A9", name: "林口", line: "A", lineName: "機場捷運", lat: 25.0700, lon: 121.3610, dests: ["台北車站", "老街溪"] },
+        { id: "A10", name: "山鼻", line: "A", lineName: "機場捷運", lat: 25.0801, lon: 121.2860, dests: ["台北車站", "老街溪"] },
+        { id: "A11", name: "坑口", line: "A", lineName: "機場捷運", lat: 25.0880, lon: 121.2650, dests: ["台北車站", "老街溪"] },
+        { id: "A12", name: "機場第一航廈", line: "A", lineName: "機場捷運", lat: 25.0817, lon: 121.2396, dests: ["台北車站", "老街溪"] },
+        { id: "A13", name: "機場第二航廈", line: "A", lineName: "機場捷運", lat: 25.0781, lon: 121.2328, dests: ["台北車站", "老街溪"] },
+        { id: "A15", name: "大園", line: "A", lineName: "機場捷運", lat: 25.0610, lon: 121.2000, dests: ["台北車站", "老街溪"] },
+        { id: "A16", name: "橫山", line: "A", lineName: "機場捷運", lat: 25.0430, lon: 121.2110, dests: ["台北車站", "老街溪"] },
+        { id: "A17", name: "領航", line: "A", lineName: "機場捷運", lat: 25.0250, lon: 121.2200, dests: ["台北車站", "老街溪"] },
+        { id: "A18", name: "高鐵桃園站", line: "A", lineName: "機場捷運", lat: 25.0128, lon: 121.2147, dests: ["台北車站", "老街溪"] },
+        { id: "A19", name: "桃園體育園區", line: "A", lineName: "機場捷運", lat: 25.0005, lon: 121.2005, dests: ["台北車站", "老街溪"] },
+        { id: "A20", name: "興南", line: "A", lineName: "機場捷運", lat: 24.9820, lon: 121.2110, dests: ["台北車站", "老街溪"] },
+        { id: "A21", name: "環北", line: "A", lineName: "機場捷運", lat: 24.9670, lon: 121.2180, dests: ["台北車站", "老街溪"] },
+        { id: "A22", name: "老街溪", line: "A", lineName: "機場捷運", lat: 24.9582, lon: 121.2225, dests: ["台北車站"] }
+      ],
+      tra: [
+        { id: "1000", name: "台北", lat: 25.0478, lon: 121.5170 },
+        { id: "1020", name: "板橋", lat: 25.0143, lon: 121.4638 },
+        { id: "0990", name: "松山", lat: 25.0491, lon: 121.5781 },
+        { id: "0980", name: "南港", lat: 25.0531, lon: 121.6071 },
+        { id: "0900", name: "基隆", lat: 25.1312, lon: 121.7397 },
+        { id: "1080", name: "桃園", lat: 24.9892, lon: 121.3136 }
+      ],
+      buses: [
+        {
+          name: "台北車站 (忠孝)", lat: 25.0465, lon: 121.5175,
+          routes: [
+            { name: "307", dest: "撫遠街", time: 2 },
+            { name: "265", dest: "重慶國中", time: 4 },
+            { name: "212直", dest: "青年公園", time: 7 },
+            { name: "604", dest: "板橋", time: 11 }
+          ]
+        },
+        {
+          name: "捷運市政府站", lat: 25.0412, lon: 121.5652,
+          routes: [
+            { name: "基隆路幹線", dest: "萬芳社區", time: 1 },
+            { name: "284", dest: "汐止社後", time: 3 },
+            { name: "仁愛幹線", dest: "南勢角", time: 6 },
+            { name: "650", dest: "大崎腳", time: 9 }
+          ]
+        },
+        {
+          name: "板橋公車站", lat: 25.0143, lon: 121.4638,
+          routes: [
+            { name: "99", dest: "新莊", time: 2 },
+            { name: "307", dest: "撫遠街", time: 4 },
+            { name: "805", dest: "五股", time: 8 }
+          ]
+        }
+      ]
+    };
+
+    function getDistanceInMeters(lat1, lon1, lat2, lon2) {
+      const R = 6371e3;
+      const φ1 = lat1 * Math.PI / 180;
+      const φ2 = lat2 * Math.PI / 180;
+      const Δφ = (lat2 - lat1) * Math.PI / 180;
+      const Δλ = (lon2 - lon1) * Math.PI / 180;
+
+      const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+                Math.cos(φ1) * Math.cos(φ2) *
+                Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+      return R * c;
+    }
+
+    function getMRTLineBadge(lineID, lineName) {
+      const str = (lineID || lineName || '').toUpperCase();
+      let bg = 'bg-slate-700 text-white';
+      let name = lineName || lineID || '捷運';
+
+      if (str.includes('BR') || str.includes('文湖')) {
+        bg = 'bg-[#C48C31] text-white'; name = '文湖線';
+      } else if (str.includes('R') || str.includes('淡水') || str.includes('信義')) {
+        bg = 'bg-[#E3002C] text-white'; name = '淡水信義線';
+      } else if (str.includes('G') || str.includes('松山') || str.includes('新店')) {
+        bg = 'bg-[#008659] text-white'; name = '松山新店線';
+      } else if (str.includes('O') || str.includes('中和') || str.includes('新蘆')) {
+        bg = 'bg-[#F8B61C] text-slate-950 font-bold'; name = '中和新蘆線';
+      } else if (str.includes('B') || str.includes('板南')) {
+        bg = 'bg-[#0070BD] text-white'; name = '板南線';
+      } else if (str.includes('Y') || str.includes('環狀')) {
+        bg = 'bg-[#FDDB00] text-slate-950 font-bold'; name = '環狀線';
+      } else if (str.includes('A') || str.includes('TYMC') || str.includes('機場')) {
+        bg = 'bg-[#8246AF] text-white'; name = '機場捷運';
+      }
+
+      return `<span class="px-2 py-0.5 text-xs rounded font-medium ${bg}">${name}</span>`;
+    }
+
+    function getTRATrainBadge(typeName) {
+      const name = typeName || '';
+      let colorClass = 'bg-slate-800 text-slate-300 border-slate-700';
+
+      if (name.includes('太魯閣') || name.includes('普悠瑪') || name.includes('EMU3000') || name.includes('自強')) {
+        colorClass = 'bg-rose-500/10 text-rose-400 border-rose-500/30';
+      } else if (name.includes('莒光')) {
+        colorClass = 'bg-amber-500/10 text-amber-400 border-amber-500/30';
+      } else if (name.includes('區間')) {
+        colorClass = 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30';
+      }
+
+      return `<span class="px-2 py-0.5 text-xs font-semibold rounded border ${colorClass}">${name}</span>`;
+    }
+
+    class AppController {
+      constructor() {
+        this.currentPos = {
+          lat: 25.0478,
+          lon: 121.5170,
+          name: '台北車站 (預設)'
+        };
+        this.isGPSActive = false;
+        this.refreshInterval = 20;
+        this.timer = null;
+        this.remainingSeconds = 20;
+
+        this.mrtStationsCache = [];
+        this.traStationsCache = [];
+
+        this.selectedMRTLine = 'ALL';
+        this.mrtSearchKeyword = '';
+
+        // Static bus route-stop relationship is cached by city; dynamic ETA is refreshed every cycle.
+        this.busRouteStopCache = new Map();
+        this.busEtaCache = [];
+        this.mrtLiveCache = [];
+        this.mrtLiveFetchedAt = 0;
+        this.traLiveCache = [];
+        this.traLiveFetchedAt = 0;
+      }
+
+      async init() {
+        lucide.createIcons();
+        this.startTimer();
+        this.startLiveCountdownTicker();
+        this.renderModalStationDirectory();
+        this.updateLocationUI();
+        this.requestLocation();
+      }
+
+      startTimer() {
+        if (this.timer) clearInterval(this.timer);
+        this.remainingSeconds = this.refreshInterval;
+        const timerText = document.getElementById('timer-text');
+
+        this.timer = setInterval(() => {
+          this.remainingSeconds--;
+          if (timerText) timerText.innerText = this.remainingSeconds;
+
+          if (this.remainingSeconds <= 0) {
+            this.refreshAllData();
+          }
+        }, 1000);
+      }
+
+      startLiveCountdownTicker() {
+        if (this.liveCountdownTimer) clearInterval(this.liveCountdownTimer);
+        this.liveCountdownTimer = setInterval(() => this.updateLiveCountdowns(), 1000);
+      }
+
+      formatCountdownSeconds(totalSeconds) {
+        if (totalSeconds === null || totalSeconds === undefined || !Number.isFinite(totalSeconds)) return '--';
+        const sec = Math.max(0, Math.round(totalSeconds));
+        if (sec <= 0) return '進站中';
+        const mins = Math.floor(sec / 60);
+        const rem = sec % 60;
+        return mins > 0 ? `${mins}分 ${String(rem).padStart(2, '0')}秒` : `${rem}秒`;
+      }
+
+      updateLiveCountdowns() {
+        const now = Date.now();
+        document.querySelectorAll('[data-countdown-target]').forEach(el => {
+          const target = Number(el.dataset.countdownTarget);
+          if (!Number.isFinite(target)) return;
+          const left = Math.max(0, Math.ceil((target - now) / 1000));
+          const zeroText = el.dataset.zeroText || '進站中';
+          el.textContent = left <= 5 ? zeroText : this.formatCountdownSeconds(left);
+        });
+      }
+
+      countdownSpan(targetMs, extraClass = 'text-slate-200 font-semibold', zeroText = '進站中') {
+        if (!Number.isFinite(targetMs)) {
+          return `<span class="${extraClass}">--</span>`;
+        }
+        const left = Math.max(0, Math.ceil((targetMs - Date.now()) / 1000));
+        const text = left <= 5 ? zeroText : this.formatCountdownSeconds(left);
+        return `<span class="live-countdown ${extraClass}" data-countdown-target="${targetMs}" data-zero-text="${zeroText}">${text}</span>`;
+      }
+
+      parseTodayClock(clockText, addDelayMin = 0) {
+        if (!clockText) return NaN;
+        const raw = String(clockText).slice(0, 8);
+        const m = raw.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+        if (!m) return NaN;
+        const d = new Date();
+        d.setHours(Number(m[1]), Number(m[2]), Number(m[3] || 0), 0);
+        d.setMinutes(d.getMinutes() + Number(addDelayMin || 0));
+        // TRA can have after-midnight services in a timetable.
+        if (d.getTime() < Date.now() - 6 * 3600 * 1000) d.setDate(d.getDate() + 1);
+        return d.getTime();
+      }
+
+      formatClock(clockText) {
+        return clockText ? String(clockText).slice(0, 5) : '--:--';
+      }
+
+      showToast(msg, duration = 3000) {
+        const toast = document.getElementById('toast-message');
+        const toastText = document.getElementById('toast-text');
+        if (!toast || !toastText) return;
+
+        toastText.innerText = msg;
+        toast.classList.remove('hidden');
+        toast.classList.add('flex');
+
+        setTimeout(() => {
+          toast.classList.add('hidden');
+          toast.classList.remove('flex');
+        }, duration);
+      }
+
+      requestLocation() {
+        const gpsStatusText = document.getElementById('gps-status-text');
+        const gpsDot = document.getElementById('gps-dot');
+
+        if (gpsStatusText) gpsStatusText.innerText = "定位中...";
+        if (gpsDot) gpsDot.className = "w-2 h-2 rounded-full bg-amber-400 pulse-dot";
+
+        if ("geolocation" in navigator) {
+          navigator.geolocation.getCurrentPosition(
+            (pos) => {
+              this.currentPos = {
+                lat: pos.coords.latitude,
+                lon: pos.coords.longitude,
+                name: "GPS 目前位置"
+              };
+              this.isGPSActive = true;
+              if (gpsStatusText) gpsStatusText.innerText = "GPS 已定位";
+              if (gpsDot) gpsDot.className = "w-2 h-2 rounded-full bg-emerald-400";
+              this.updateLocationUI();
+              this.showToast("已成功取得目前 GPS 定位");
+              this.refreshAllData();
+            },
+            (err) => {
+              console.warn("GPS Location error:", err.message);
+              this.isGPSActive = false;
+              if (gpsStatusText) gpsStatusText.innerText = "預設樞紐";
+              if (gpsDot) gpsDot.className = "w-2 h-2 rounded-full bg-slate-500";
+              this.updateLocationUI();
+              this.showToast("無法取得 GPS 定位，已設定為台北車站");
+              this.refreshAllData();
+            },
+            { timeout: 8000, maximumAge: 60000 }
+          );
+        } else {
+          this.isGPSActive = false;
+          if (gpsStatusText) gpsStatusText.innerText = "不支援 GPS";
+          if (gpsDot) gpsDot.className = "w-2 h-2 rounded-full bg-slate-500";
+          this.updateLocationUI();
+          this.refreshAllData();
+        }
+      }
+
+      setManualLocation(name, lat, lon) {
+        if (name === 'GPS') {
+          this.requestLocation();
+          return;
+        }
+
+        this.currentPos = { lat, lon, name };
+        this.isGPSActive = false;
+
+        const gpsStatusText = document.getElementById('gps-status-text');
+        const gpsDot = document.getElementById('gps-dot');
+        if (gpsStatusText) gpsStatusText.innerText = name;
+        if (gpsDot) gpsDot.className = "w-2 h-2 rounded-full bg-indigo-400";
+
+        this.updateLocationUI();
+        this.showToast(`已手動切換位置至：${name}`);
+        this.refreshAllData();
+      }
+
+      updateLocationUI() {
+        const coordsText = document.getElementById('current-coords-text');
+        if (coordsText) {
+          coordsText.innerText = `${this.currentPos.lat.toFixed(4)}, ${this.currentPos.lon.toFixed(4)} (${this.currentPos.name})`;
+        }
+      }
+
+      async refreshAllData() {
+        const refreshIconMobile = document.getElementById('icon-refresh-mobile');
+        const refreshIconDesktop = document.getElementById('icon-refresh-desktop');
+
+        if (refreshIconMobile) refreshIconMobile.classList.add('animate-spin');
+        if (refreshIconDesktop) refreshIconDesktop.classList.add('animate-spin');
+
+        try {
+          await Promise.all([
+            this.fetchAndRenderMRT(),
+            this.fetchAndRenderTRA(),
+            this.fetchAndRenderBuses()
+          ]);
+        } catch (err) {
+          console.error("Data refresh error:", err);
+        } finally {
+          if (refreshIconMobile) refreshIconMobile.classList.remove('animate-spin');
+          if (refreshIconDesktop) refreshIconDesktop.classList.remove('animate-spin');
+          this.remainingSeconds = this.refreshInterval;
+          const timerText = document.getElementById('timer-text');
+          if (timerText) timerText.innerText = this.remainingSeconds;
+        }
+      }
+
+      openMetroMapModal() {
+        const modal = document.getElementById('metro-map-modal');
+        if (modal) {
+          modal.classList.remove('hidden');
+          lucide.createIcons();
+        }
+      }
+
+      closeMetroMapModal() {
+        const modal = document.getElementById('metro-map-modal');
+        if (modal) modal.classList.add('hidden');
+      }
+
+      selectStationFromModal(name, lat, lon) {
+        this.closeMetroMapModal();
+        this.setManualLocation(name, lat, lon);
+      }
+
+      filterMRTByLine(lineCode) {
+        this.selectedMRTLine = lineCode;
+        document.querySelectorAll('.mrt-line-filter').forEach(btn => {
+          if (btn.getAttribute('data-line') === lineCode) {
+            btn.className = "mrt-line-filter px-2.5 py-1 rounded-md bg-indigo-600 text-white font-bold border border-indigo-500 hover:bg-indigo-500 transition cursor-pointer";
+          } else {
+            btn.className = "mrt-line-filter px-2.5 py-1 rounded-md bg-slate-800 text-slate-300 border border-slate-700 hover:bg-slate-700 transition cursor-pointer";
+          }
+        });
+        this.fetchAndRenderMRT();
+      }
+
+      handleMRTSearch(keyword) {
+        this.mrtSearchKeyword = (keyword || '').trim().toLowerCase();
+        this.fetchAndRenderMRT();
+      }
+
+      renderModalStationDirectory() {
+        const container = document.getElementById('modal-station-directory');
+        if (!container) return;
+
+        const lines = [
+          { name: "板南線 (BL - 23 站)", color: "border-l-4 border-[#0070BD]", line: "BL" },
+          { name: "淡水信義線 (R - 28 站)", color: "border-l-4 border-[#E3002C]", line: "R" },
+          { name: "松山新店線 (G - 19 站)", color: "border-l-4 border-[#008659]", line: "G" },
+          { name: "中和新蘆線 (O - 26 站)", color: "border-l-4 border-[#F8B61C]", line: "O" },
+          { name: "文湖線 (BR - 24 站)", color: "border-l-4 border-[#C48C31]", line: "BR" },
+          { name: "環狀線 (Y - 14 站)", color: "border-l-4 border-[#FDDB00]", line: "Y" },
+          { name: "機場捷運 (A - 22 站)", color: "border-l-4 border-[#8246AF]", line: "A" }
+        ];
+
+        let html = '';
+        lines.forEach(l => {
+          const stations = OFFLINE_STATIONS.mrt.filter(s => s.line === l.line);
+          html += `
+            <div class="bg-slate-900 border border-slate-800 rounded-lg p-3 ${l.color}">
+              <div class="font-bold text-white mb-2 pb-1 border-b border-slate-800 flex items-center justify-between">
+                <span>${l.name}</span>
+                <span class="text-[11px] text-slate-500">點擊可設為目前位置</span>
+              </div>
+              <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-1.5">
+          `;
+          stations.forEach(st => {
+            html += `
+              <button onclick="app.selectStationFromModal('${st.name}', ${st.lat}, ${st.lon})" class="px-2 py-1.5 bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-slate-600 text-slate-200 rounded text-[11px] transition cursor-pointer flex items-center justify-between">
+                <span class="font-medium">${st.name}</span>
+                <span class="text-slate-500 font-mono text-[10px] ml-1">${st.id}</span>
+              </button>
+            `;
+          });
+          html += `
+              </div>
+          `;
+        });
+
+        container.innerHTML = html;
+      }
+
+      async fetchAndRenderMRT() {
+        const container = document.getElementById('mrt-container');
+        const countBadge = document.getElementById('mrt-count');
+
+        try {
+          if (!tdxAuth.isDemoMode && this.mrtStationsCache.length === 0) {
+            const [trtcStations, tymcStations] = await Promise.all([
+              tdxAuth.fetchAPI(`${TDX_CONFIG.baseUrl}/v2/Rail/Metro/Station/TDX/TRTC?$format=JSON`),
+              tdxAuth.fetchAPI(`${TDX_CONFIG.baseUrl}/v2/Rail/Metro/Station/TDX/TYMC?$format=JSON`).catch(() => [])
+            ]);
+
+            this.mrtStationsCache = [
+              ...(trtcStations || []).map(s => ({ ...s, Operator: 'TRTC' })),
+              ...(tymcStations || []).map(s => ({ ...s, Operator: 'TYMC' }))
+            ];
+          }
+
+          if (!tdxAuth.isDemoMode && this.mrtStationsCache.length > 0) {
+            let filtered = this.mrtStationsCache.map(st => ({
+              ...st,
+              dist: getDistanceInMeters(this.currentPos.lat, this.currentPos.lon, st.StationPosition.PositionLat, st.StationPosition.PositionLon)
+            }));
+
+            if (this.selectedMRTLine !== 'ALL') {
+              filtered = filtered.filter(st => (st.LineID || '').includes(this.selectedMRTLine));
+            }
+
+            if (this.mrtSearchKeyword) {
+              filtered = filtered.filter(st => 
+                (st.StationName?.Zh_tw || '').toLowerCase().includes(this.mrtSearchKeyword) ||
+                (st.StationID || '').toLowerCase().includes(this.mrtSearchKeyword)
+              );
+            }
+
+            // Dynamic slice limit: show all if line or search selected, else top 9 nearest
+            const displayLimit = (this.selectedMRTLine !== 'ALL' || this.mrtSearchKeyword) ? filtered.length : 9;
+            const sorted = filtered.sort((a, b) => a.dist - b.dist).slice(0, displayLimit);
+
+            const [trtcLive, tymcLive] = await Promise.all([
+              tdxAuth.fetchAPI(`${TDX_CONFIG.baseUrl}/v2/Rail/Metro/LiveBoard/TRTC?$format=JSON`).catch(() => []),
+              tdxAuth.fetchAPI(`${TDX_CONFIG.baseUrl}/v2/Rail/Metro/LiveBoard/TYMC?$format=JSON`).catch(() => [])
+            ]);
+
+            const allLive = [...(trtcLive || []), ...(tymcLive || [])];
+            countBadge.innerText = `符合條件: ${sorted.length} / ${filtered.length} 站`;
+
+            if (sorted.length === 0) {
+              container.innerHTML = `<div class="col-span-full py-8 text-center text-slate-500 text-xs">沒有找到符合條件的捷運站點</div>`;
+              return;
+            }
+
+            let html = '';
+            sorted.forEach(st => {
+              const stName = st.StationName.Zh_tw;
+              const boards = allLive.filter(b => b.StationID === st.StationID || b.StationName?.Zh_tw === stName);
+              
+              const destGroups = {};
+              boards.forEach(b => {
+                const dest = b.DestinationStationName?.Zh_tw || b.TripHeadSign || '其他方向';
+                if (!destGroups[dest]) destGroups[dest] = [];
+                destGroups[dest].push({
+                  ...b,
+                  // TDX MRT LiveBoard EstimateTime is in minutes.
+                  EstimateSeconds: Number.isFinite(Number(b.EstimateTime)) ? Number(b.EstimateTime) * 60 : NaN,
+                  ServiceStatus: Number.isFinite(Number(b.ServiceStatus)) ? Number(b.ServiceStatus) : 0
+                });
+              });
+
+              html += this.renderMRTCard(stName, st.LineID, st.LineName?.Zh_tw, st.dist, destGroups);
+            });
+
+            container.innerHTML = html;
+            lucide.createIcons();
+            return;
+          }
+        } catch (err) {
+          console.warn("MRT API unavailable:", err.message);
+          this.showToast(`捷運即時 API 暫時無法取得：${err.message}`, 5000);
+        }
+
+        // TDX unavailable: keep station discovery, but do NOT fabricate live arrival times.
+        let offlineList = OFFLINE_STATIONS.mrt.map(st => ({
+          ...st,
+          dist: getDistanceInMeters(this.currentPos.lat, this.currentPos.lon, st.lat, st.lon)
+        }));
+
+        if (this.selectedMRTLine !== 'ALL') {
+          offlineList = offlineList.filter(st => st.line === this.selectedMRTLine);
+        }
+
+        if (this.mrtSearchKeyword) {
+          offlineList = offlineList.filter(st => 
+            st.name.toLowerCase().includes(this.mrtSearchKeyword) ||
+            st.id.toLowerCase().includes(this.mrtSearchKeyword)
+          );
+        }
+
+        // If specific line or search keyword, show ALL matching; if ALL mode, display top 9 nearest
+        const displayLimit = (this.selectedMRTLine !== 'ALL' || this.mrtSearchKeyword) ? offlineList.length : 9;
+        const offlineSorted = offlineList.sort((a, b) => a.dist - b.dist).slice(0, displayLimit);
+
+        countBadge.innerText = `符合條件: ${offlineSorted.length} 站`;
+        if (offlineSorted.length === 0) {
+          container.innerHTML = `<div class="col-span-full py-8 text-center text-slate-500 text-xs">沒有找到符合條件的捷運站點</div>`;
+          return;
+        }
+
+        let html = '';
+        offlineSorted.forEach((st) => {
+          html += this.renderMRTCard(st.name, st.line, st.lineName, st.dist, {});
+        });
+
+        container.innerHTML = html;
+        lucide.createIcons();
+      }
+
+      renderMRTCard(stName, lineID, lineName, dist, destGroups) {
+        let html = `
+          <div class="bg-slate-950/70 border border-slate-800 hover:border-slate-700 transition rounded-xl p-4 flex flex-col justify-between">
+            <div>
+              <div class="flex items-center justify-between mb-3 pb-2 border-b border-slate-800">
+                <div class="flex items-center space-x-2">
+                  ${getMRTLineBadge(lineID, lineName)}
+                  <h3 class="font-bold text-white text-base">${stName}</h3>
+                </div>
+                <span class="text-xs text-slate-400 font-mono">${Math.round(dist)}m</span>
+              </div>
+              <div class="space-y-2 text-xs">
+        `;
+
+        if (Object.keys(destGroups).length === 0) {
+          html += `<p class="text-slate-500 py-2">目前無可用即時列車資料（TDX暫時無回應）</p>`;
+        } else {
+          Object.entries(destGroups).forEach(([destName, items]) => {
+            items.sort((a,b) => Number(a.EstimateSeconds ?? 999999) - Number(b.EstimateSeconds ?? 999999));
+            const topItem = items[0] || {};
+            const status = Number(topItem.ServiceStatus || 0);
+            const statusText = {
+              1: '尚未發車',
+              2: '交管不停靠',
+              3: '末班車已過',
+              4: '今日未營運'
+            }[status];
+
+            let arrivalHtml;
+            if (statusText) {
+              arrivalHtml = `<span class="text-slate-400 font-medium">${statusText}</span>`;
+            } else if (Number.isFinite(Number(topItem.EstimateSeconds)) && Number(topItem.EstimateSeconds) >= 0) {
+              const estimateSec = Number(topItem.EstimateSeconds);
+              const baseAt = topItem.UpdateTime || topItem.SrcUpdateTime;
+              let targetMs = Date.now() + estimateSec * 1000;
+              if (baseAt) {
+                const updateMs = new Date(baseAt).getTime();
+                if (Number.isFinite(updateMs)) targetMs = updateMs + estimateSec * 1000;
+              }
+              arrivalHtml = this.countdownSpan(targetMs, estimateSec <= 120 ? 'text-amber-400 font-bold' : 'text-slate-200 font-medium');
+            } else {
+              arrivalHtml = `<span class="text-slate-500">暫無秒數</span>`;
+            }
+
+            html += `
+              <div class="flex items-center justify-between bg-slate-900/90 px-3 py-2 rounded-lg border border-slate-800/60">
+                <span class="text-slate-300 flex items-center gap-1">
+                  <i data-lucide="arrow-right-circle" class="w-3.5 h-3.5 text-slate-500"></i>
+                  往 ${destName}
+                </span>
+                ${arrivalHtml}
+              </div>
+            `;
+          });
+        }
+
+        html += `
+              </div>
+            </div>
+          </div>
+        `;
+        return html;
+      }
+
+      async fetchAndRenderTRA() {
+        const northList = document.getElementById('tra-northbound-list');
+        const southList = document.getElementById('tra-southbound-list');
+        const stationTitle = document.getElementById('tra-station-title');
+
+        try {
+          if (!tdxAuth.isDemoMode && this.traStationsCache.length === 0) {
+            const stations = await tdxAuth.fetchAPI(`${TDX_CONFIG.baseUrl}/v2/Rail/TRA/Station?$top=5000&$format=JSON`);
+            this.traStationsCache = Array.isArray(stations) ? stations : (stations?.Stations || []);
+          }
+
+          if (!tdxAuth.isDemoMode && this.traStationsCache.length > 0) {
+            const sorted = this.traStationsCache.map(st => ({
+              ...st,
+              dist: getDistanceInMeters(this.currentPos.lat, this.currentPos.lon, st.StationPosition?.PositionLat, st.StationPosition?.PositionLon)
+            })).filter(st => Number.isFinite(st.dist)).sort((a,b) => a.dist - b.dist);
+
+            const nearest = sorted[0];
+            if (!nearest) throw new Error('找不到台鐵最近車站');
+
+            const stationId = nearest.StationID;
+            const stationName = nearest.StationName?.Zh_tw || '未知車站';
+            stationTitle.innerHTML = `最近車站：<strong class="text-white">${stationName}</strong> · 距離約 ${Math.round(nearest.dist)}m · <span class="text-slate-500">時刻表 + 即時誤點</span>`;
+
+            const today = new Date();
+            const dateStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+
+            // Do not let one endpoint failure wipe out the other. LiveBoard covers roughly +/-30 minutes;
+            // DailyTimetable extends the schedule so the UI can show the next +/-5 trains.
+            const [dailyRes, liveRes] = await Promise.allSettled([
+              tdxAuth.fetchAPI(`${TDX_CONFIG.baseUrl}/v2/Rail/TRA/DailyTimetable/Station/${stationId}/${dateStr}?$top=2000&$format=JSON`),
+              tdxAuth.fetchAPI(`${TDX_CONFIG.baseUrl}/v2/Rail/TRA/LiveBoard/Station/${stationId}?$top=100&$format=JSON`)
+            ]);
+
+            const dailyRaw = dailyRes.status === 'fulfilled' ? dailyRes.value : [];
+            const liveRaw = liveRes.status === 'fulfilled' ? liveRes.value : [];
+            const live = Array.isArray(liveRaw) ? liveRaw : (liveRaw?.StationLiveBoards || []);
+            const daily = this.normalizeTRATimetable(dailyRaw, stationName, stationId);
+            const liveMap = new Map(live.map(x => [String(x.TrainNo), x]));
+            const merged = new Map();
+
+            // First use the full daily timetable.
+            daily.forEach(t => {
+              const liveRow = liveMap.get(String(t.TrainNo));
+              const delay = liveRow && Number.isFinite(Number(liveRow.DelayTime)) ? Number(liveRow.DelayTime) : null;
+              const scheduled = this.parseTodayClock(t.ScheduledTime);
+              const actualTarget = Number.isFinite(scheduled) ? scheduled + (delay || 0) * 60000 : NaN;
+              const row = { ...t, delay, scheduledTarget: scheduled, actualTarget, liveRow };
+              if (Number.isFinite(scheduled)) merged.set(String(t.TrainNo), row);
+            });
+
+            // Then add liveboard-only rows when daily timetable is unavailable/incomplete.
+            live.forEach(x => {
+              const no = String(x.TrainNo || '');
+              if (!no) return;
+              const scheduledTime = x.ScheduledDepartureTime || x.ScheduledArrivalTime;
+              const scheduled = this.parseTodayClock(scheduledTime);
+              const delay = Number.isFinite(Number(x.DelayTime)) ? Number(x.DelayTime) : null;
+              const actualTarget = Number.isFinite(scheduled) ? scheduled + (delay || 0) * 60000 : NaN;
+              if (!merged.has(no)) {
+                merged.set(no, {
+                  TrainNo: no,
+                  Direction: Number(x.Direction),
+                  EndingStationName: x.EndingStationName || { Zh_tw: '未知' },
+                  TrainTypeName: x.TrainTypeName || { Zh_tw: '列車' },
+                  ScheduledTime: scheduledTime,
+                  delay, scheduledTarget: scheduled, actualTarget, liveRow: x
+                });
+              } else {
+                const row = merged.get(no);
+                row.liveRow = x;
+                row.delay = delay;
+                row.actualTarget = Number.isFinite(row.scheduledTarget) ? row.scheduledTarget + (delay || 0) * 60000 : actualTarget;
+              }
+            });
+
+            const now = Date.now();
+            const upcoming = [...merged.values()]
+              .filter(t => Number.isFinite(t.actualTarget) && t.actualTarget >= now - 5 * 60000)
+              .sort((a,b) => a.actualTarget - b.actualTarget);
+
+            const northbound = upcoming.filter(t => Number(t.Direction) === 0).slice(0, 5);
+            const southbound = upcoming.filter(t => Number(t.Direction) === 1).slice(0, 5);
+
+            northList.innerHTML = this.renderTRARows(northbound);
+            southList.innerHTML = this.renderTRARows(southbound);
+            this.traLiveCache = live;
+            this.traLiveFetchedAt = Date.now();
+            lucide.createIcons();
+            this.updateLiveCountdowns();
+            return;
+          }
+        } catch (err) {
+          console.warn('TRA API unavailable:', err.message);
+          this.showToast(`台鐵 API 暫時無法取得：${err.message}`, 5000);
+        }
+
+        // Never show fabricated 19:15/19:18-style fallback times.
+        stationTitle.innerHTML = `<span class="text-amber-400">TDX 目前無法取得台鐵即時資料</span> · 請稍後更新`;
+        northList.innerHTML = `<p class="text-xs text-slate-500 py-4 text-center">暫時沒有可驗證的北上班次</p>`;
+        southList.innerHTML = `<p class="text-xs text-slate-500 py-4 text-center">暫時沒有可驗證的南下班次</p>`;
+      }
+
+      normalizeTRATimetable(raw, fallbackStationName = '', stationId = '') {
+        const arr = Array.isArray(raw) ? raw : (raw?.DailyTimetables || raw?.StationDailyTimetables || []);
+        const out = [];
+        arr.forEach(item => {
+          const ti = item.TrainInfo || item.DailyTrainInfo || item;
+          const trainNo = ti.TrainNo || item.TrainNo;
+          if (!trainNo) return;
+
+          const dirRaw = item.Direction ?? ti.Direction ?? item.TrainInfo?.Direction;
+          if (dirRaw === undefined || dirRaw === null || dirRaw === '') return;
+          const dir = Number(dirRaw);
+
+          const dest = item.DestinationStation?.StationName?.Zh_tw ||
+                       item.DestinationStation?.Zh_tw ||
+                       ti.EndingStationName?.Zh_tw ||
+                       ti.EndingStation?.StationName?.Zh_tw ||
+                       item.EndingStationName?.Zh_tw ||
+                       '未知';
+
+          const times = Array.isArray(item.Timetables) ? item.Timetables :
+                        (Array.isArray(item.StopTimes) ? item.StopTimes :
+                        (Array.isArray(ti.StopTimes) ? ti.StopTimes : []));
+          const timeObj = times.find(x =>
+            (stationId && String(x.StationID) === String(stationId)) ||
+            x.StationName?.Zh_tw === fallbackStationName
+          ) || times[0];
+          const sched = item.ScheduledDepartureTime || item.ScheduledArrivalTime ||
+                        item.DepartureTime || item.ArrivalTime ||
+                        timeObj?.DepartureTime || timeObj?.ArrivalTime || null;
+
+          if (!sched) return;
+          out.push({
+            TrainNo: String(trainNo),
+            Direction: dir,
+            EndingStationName: { Zh_tw: dest },
+            TrainTypeName: ti.TrainTypeName || item.TrainTypeName || { Zh_tw: '列車' },
+            ScheduledTime: sched
+          });
+        });
+        return out;
+      }
+
+      renderTRARows(trains) {
+        if (!trains || trains.length === 0) {
+          return `<p class="text-xs text-slate-500 py-3 text-center">近期無可顯示班次</p>`;
+        }
+
+        return trains.map(t => {
+          const delay = Number.isFinite(Number(t.delay)) ? Number(t.delay) : Number(t.DelayTime || 0);
+          const delayText = Number.isFinite(Number(t.delay))
+            ? (delay === 0 ? `<span class="text-emerald-400 font-medium">準點</span>` : `<span class="text-amber-400 font-medium">晚 ${delay} 分</span>`)
+            : `<span class="text-slate-500">未取得即時誤點</span>`;
+
+          const target = Number.isFinite(t.actualTarget) ? t.actualTarget : this.parseTodayClock(t.ScheduledTime, delay);
+          const remaining = Number.isFinite(target) ? Math.ceil((target - Date.now()) / 1000) : NaN;
+          const timeHtml = Number.isFinite(target)
+            ? this.countdownSpan(target, remaining <= 120 ? 'text-amber-400 font-bold text-sm' : 'text-slate-200 font-semibold text-sm')
+            : `<span class="text-slate-400 font-mono">${this.formatClock(t.ScheduledTime)}</span>`;
+
+          return `
+            <div class="flex items-center justify-between p-2.5 bg-slate-900/80 rounded-lg border border-slate-800/80 text-xs hover:border-slate-700 transition gap-3">
+              <div class="flex items-center space-x-2 min-w-0">
+                ${getTRATrainBadge(t.TrainTypeName?.Zh_tw)}
+                <span class="font-mono text-slate-400">#${t.TrainNo}</span>
+                <span class="text-slate-200 font-medium truncate">往 ${t.EndingStationName?.Zh_tw || '未知'}</span>
+              </div>
+              <div class="flex items-center space-x-3 whitespace-nowrap">
+                <div class="text-right">
+                  <div>${timeHtml}</div>
+                  <div class="text-[10px] text-slate-500 mt-0.5">表定 ${this.formatClock(t.ScheduledTime)}</div>
+                </div>
+                ${delayText}
+              </div>
+          `;
+        }).join('');
+      }
+
+      async fetchAndRenderBuses() {
+        const container = document.getElementById('bus-container');
+        const countBadge = document.getElementById('bus-stop-count');
+
+        try {
+          if (!tdxAuth.isDemoMode) {
+            // Nearby stop lookup is an ADVANCED TDX API. Basic /v2/Bus/Stop/NearBy is not the correct service.
+            const spatial = `nearby(${this.currentPos.lat},${this.currentPos.lon},1000)`;
+            const stopUrl = `${TDX_CONFIG.advancedBaseUrl}/v2/Bus/Stop/NearBy?$top=50&$spatialFilter=${encodeURIComponent(spatial)}&$format=JSON`;
+            const etaUrl = `${TDX_CONFIG.advancedBaseUrl}/v2/Bus/EstimatedTimeOfArrival/NearBy?$top=1000&$spatialFilter=${encodeURIComponent(spatial)}&$format=JSON`;
+
+            const [stopRes, etaRes] = await Promise.allSettled([
+              tdxAuth.fetchAPI(stopUrl),
+              tdxAuth.fetchAPI(etaUrl)
+            ]);
+
+            if (stopRes.status !== 'fulfilled') throw new Error(`附近站牌 API 失敗: ${stopRes.reason?.message || 'unknown'}`);
+
+            const nearbyStops = Array.isArray(stopRes.value) ? stopRes.value : (stopRes.value?.Stops || []);
+            if (!nearbyStops.length) throw new Error('1公里內找不到公車站牌');
+
+            const enriched = nearbyStops.map(stop => ({
+              ...stop,
+              dist: getDistanceInMeters(this.currentPos.lat, this.currentPos.lon, stop.StopPosition?.PositionLat, stop.StopPosition?.PositionLon)
+            })).filter(s => Number.isFinite(s.dist)).sort((a,b) => a.dist - b.dist);
+
+            // Show the 3 closest named stop groups; group sides of the road by StationID when available.
+            const stopGroups = [];
+            const groupKey = s => `${s.City || ''}|${s.StationID || s.StopName?.Zh_tw || ''}`;
+            const seenGroups = new Set();
+            for (const stop of enriched) {
+              const key = groupKey(stop);
+              if (seenGroups.has(key)) continue;
+              const same = enriched.filter(s => groupKey(s) === key);
+              stopGroups.push({
+                key,
+                name: stop.StopName?.Zh_tw || '未命名站牌',
+                city: stop.City || '',
+                stops: same,
+                dist: Math.min(...same.map(s => s.dist))
+              });
+              seenGroups.add(key);
+              if (stopGroups.length >= 3) break;
+            }
+
+            let allETA = etaRes.status === 'fulfilled' ? etaRes.value : [];
+            allETA = Array.isArray(allETA) ? allETA : (allETA?.Estimates || []);
+
+            // Fallback for ETA only: query by route for the small set of route names observed at the nearest stops.
+            if (!allETA.length) {
+              const cities = [...new Set(stopGroups.map(g => g.city).filter(Boolean))];
+              const routes = [...new Set(stopGroups.flatMap(g => (g.stops || []).map(s => s.RouteName?.Zh_tw || s.RouteID).filter(Boolean)))];
+              const arrays = [];
+              for (const city of cities) {
+                for (const route of routes.slice(0, 30)) {
+                  const u = `${TDX_CONFIG.baseUrl}/v2/Bus/EstimatedTimeOfArrival/City/${encodeURIComponent(city)}/${encodeURIComponent(route)}?$top=200&$format=JSON`;
+                  const rr = await tdxAuth.fetchAPI(u).catch(() => []);
+                  if (Array.isArray(rr)) arrays.push(...rr);
+                }
+              }
+              allETA = arrays;
+            }
+
+            // Fetch route-stop metadata only for routes actually observed in the nearest stop groups.
+            const routeKeys = [...new Set(allETA
+              .filter(e => stopGroups.some(g => g.stops.some(s => s.StopUID === e.StopUID)))
+              .map(e => `${e.City || ''}|${e.RouteName?.Zh_tw || e.SubRouteName?.Zh_tw || e.RouteUID || ''}`)
+              .filter(Boolean))];
+            await Promise.all(routeKeys.slice(0, 40).map(key => {
+              const [city, route] = key.split('|');
+              return this.ensureBusRouteStopCache(city, route);
+            }));
+
+            this.busEtaCache = allETA;
+            countBadge.innerText = `最近 ${stopGroups.length} 個站牌群`;
+
+            let html = '';
+            stopGroups.forEach(group => {
+              const stopUIDs = new Set(group.stops.map(s => s.StopUID));
+              const matched = allETA.filter(e => stopUIDs.has(e.StopUID));
+              html += this.renderBusCard(group, matched);
+            });
+
+            container.innerHTML = html;
+            lucide.createIcons();
+            this.updateLiveCountdowns();
+            return;
+          }
+        } catch (err) {
+          console.warn('Bus API unavailable:', err.message);
+        }
+
+        countBadge.innerText = 'TDX 公車資料暫不可用';
+        container.innerHTML = `
+          <div class="col-span-full bg-slate-950/70 border border-amber-500/20 rounded-xl p-5">
+            <div class="flex items-start gap-3">
+              <i data-lucide="triangle-alert" class="w-5 h-5 text-amber-400 mt-0.5"></i>
+              <div class="text-xs">
+                <div class="font-semibold text-amber-300">目前無法驗證附近公車站牌 / 即時到站資料</div>
+                <div class="text-slate-400 mt-1">這裡不再顯示假的站牌與到站時間；請確認 TDX API 狀態後按「立即更新」。</div>
+              </div>
+            </div>
+          </div>`;
+        lucide.createIcons();
+      }
+
+      async ensureBusRouteStopCache(city, routeName = '') {
+        if (!city) return new Map();
+        const key = `${city}|${routeName || '*'}`;
+        if (this.busRouteStopCache.has(key)) return this.busRouteStopCache.get(key);
+
+        const routePart = routeName ? `/${encodeURIComponent(routeName)}` : '';
+        const url = `${TDX_CONFIG.baseUrl}/v2/Bus/StopOfRoute/City/${encodeURIComponent(city)}${routePart}?$top=500&$format=JSON`;
+        const raw = await tdxAuth.fetchAPI(url);
+        const usable = Array.isArray(raw) ? raw : (raw?.Routes || []);
+        const byStop = new Map();
+
+        usable.forEach(route => {
+          const routeNameZh = route.RouteName?.Zh_tw || route.RouteID || '';
+          const subRouteName = route.SubRouteName?.Zh_tw || routeNameZh;
+          const dir = Number(route.Direction);
+          const stops = Array.isArray(route.Stops) ? route.Stops : [];
+          if (!stops.length) return;
+          const sortedStops = [...stops].sort((a,b) => Number(a.StopSequence || 0) - Number(b.StopSequence || 0));
+          const lastStop = sortedStops[sortedStops.length - 1];
+          const destination = lastStop?.StopName?.Zh_tw || this.extractBusDestination(subRouteName) || subRouteName;
+
+          stops.forEach(st => {
+            if (!byStop.has(st.StopUID)) byStop.set(st.StopUID, []);
+            byStop.get(st.StopUID).push({
+              routeUID: route.RouteUID,
+              routeName: routeNameZh,
+              subRouteUID: route.SubRouteUID || route.RouteUID,
+              subRouteName,
+              direction: dir,
+              destination,
+              stopSequence: st.StopSequence
+            });
+          });
+        });
+
+        this.busRouteStopCache.set(key, byStop);
+        return byStop;
+      }
+
+      extractBusDestination(text) {
+        const s = String(text || '');
+        const m = s.match(/往(.+)$/);
+        return m ? m[1].trim() : '';
+      }
+
+      getBusRouteMeta(eta) {
+        const city = this.findCityForETA(eta);
+        const routeName = eta.RouteName?.Zh_tw || eta.SubRouteName?.Zh_tw || eta.RouteUID || '';
+        const candidates = [...this.busRouteStopCache.entries()]
+          .filter(([key]) => key.startsWith(`${city}|`) && key !== `${city}|*`);
+        for (const [, cache] of candidates) {
+          const rows = cache.get(eta.StopUID) || [];
+          const exact = rows.find(r => String(r.direction) === String(eta.Direction) &&
+            (String(r.routeUID) === String(eta.RouteUID) || String(r.subRouteUID) === String(eta.SubRouteUID)));
+          if (exact) return exact;
+          const sameDir = rows.find(r => String(r.direction) === String(eta.Direction));
+          if (sameDir) return sameDir;
+        }
+        return {
+          routeName: eta.RouteName?.Zh_tw || '',
+          subRouteName: eta.SubRouteName?.Zh_tw || '',
+          direction: Number(eta.Direction),
+          destination: this.extractBusDestination(eta.SubRouteName?.Zh_tw) || eta.DestinationStopName?.Zh_tw || ''
+        };
+      }
+
+      findCityForETA(eta) {
+        if (eta?.City) return eta.City;
+        for (const [key, cache] of this.busRouteStopCache.entries()) {
+          if (cache.has(eta?.StopUID)) return key.split('|')[0];
+        }
+        return null;
+      }
+
+      renderBusCard(group, routes) {
+        const groupName = group?.name || '未命名站牌';
+        const dist = Number.isFinite(group?.dist) ? Math.round(group.dist) : null;
+        const actualRoutes = (routes || [])
+          .filter(r => r && r.StopUID)
+          .map(r => {
+            const meta = this.getBusRouteMeta(r);
+            return { ...r, meta, _targetMs: this.getBusETATarget(r) };
+          })
+          .sort((a,b) => (a._targetMs || Infinity) - (b._targetMs || Infinity));
+
+        // De-duplicate to one row per route + direction, keeping the earliest ETA.
+        const dedup = new Map();
+        actualRoutes.forEach(r => {
+          const meta = r.meta;
+          const key = `${r.RouteUID || r.RouteName?.Zh_tw}|${r.Direction}`;
+          if (!dedup.has(key) || (r._targetMs || Infinity) < (dedup.get(key)._targetMs || Infinity)) dedup.set(key, r);
+        });
+
+        let html = `
+          <div class="bg-slate-950/70 border border-slate-800 hover:border-slate-700 transition rounded-xl p-4 flex flex-col">
+            <div>
+              <div class="flex items-start justify-between mb-3 pb-2 border-b border-slate-800 gap-3">
+                <div>
+                  <h3 class="font-bold text-white text-base flex items-center gap-1.5">
+                    <i data-lucide="map-pin" class="w-4 h-4 text-amber-400"></i>
+                    ${groupName}
+                  </h3>
+                  <div class="text-[11px] text-slate-500 mt-1">
+                    ${group?.city || ''}${dist !== null ? ` · 約 ${dist}m` : ''}
+                  </div>
+                </div>
+                <span class="text-xs bg-slate-800 text-slate-400 px-2 py-0.5 rounded whitespace-nowrap">公車站牌</span>
+              </div>
+              <div class="space-y-2 text-xs">
+        `;
+
+        if (dedup.size === 0) {
+          html += `<p class="text-slate-500 py-2">附近目前沒有可用的即時公車預估</p>`;
+        } else {
+          [...dedup.values()].slice(0, 12).forEach(r => {
+            const meta = r.meta || {};
+            const routeName = r.RouteName?.Zh_tw || r.SubRouteName?.Zh_tw || r.RouteName || meta.subRouteName || meta.routeName || '未知路線';
+            const directionText = r.Direction === 0 ? '去程' : r.Direction === 1 ? '回程' : '循環';
+            const destination = meta.destination || this.extractBusDestination(r.SubRouteName?.Zh_tw) || r.DestinationStopName?.Zh_tw || r.EstimateTimeDestination?.Zh_tw || '方向未提供';
+            let statusHtml;
+
+            if (Number.isFinite(r._targetMs)) {
+              const secondsLeft = Math.ceil((r._targetMs - Date.now()) / 1000);
+              statusHtml = this.countdownSpan(r._targetMs, secondsLeft <= 120 ? 'text-amber-400 font-bold text-sm' : 'text-slate-200 font-semibold text-sm', '進站中');
+            } else if (r.NextBusTime) {
+              statusHtml = `<span class="text-slate-300 font-mono">下一班 ${new Date(r.NextBusTime).toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit',second:'2-digit'})}</span>`;
+            } else {
+              statusHtml = `<span class="text-slate-500">暫無預估</span>`;
+            }
+
+            html += `
+              <div class="bg-slate-900/90 px-3 py-2 rounded-lg border border-slate-800/60">
+                <div class="flex items-center justify-between gap-3">
+                  <div class="min-w-0">
+                    <div class="flex items-center gap-2">
+                      <span class="font-bold text-indigo-300">${routeName}</span>
+                      <span class="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">${directionText}</span>
+                    </div>
+                    <div class="text-[11px] text-slate-400 truncate mt-0.5">往 ${destination}</div>
+                  </div>
+                  <div class="text-right whitespace-nowrap">${statusHtml}</div>
+                </div>
+              </div>
+            `;
+          });
+        }
+
+        html += `
+              </div>
+            </div>
+          </div>
+        `;
+        return html;
+      }
+
+      getBusETATarget(row) {
+        const sec = Number(row.EstimateTime);
+        if (!Number.isFinite(sec) || sec < 0) return NaN;
+        const updateRaw = row.UpdateTime || row.SrcUpdateTime;
+        const updateMs = updateRaw ? new Date(updateRaw).getTime() : NaN;
+        if (Number.isFinite(updateMs)) return updateMs + sec * 1000;
+        return Date.now() + sec * 1000;
+      }
+
+    }
+
+    const app = new AppController();
+    window.addEventListener('DOMContentLoaded', () => {
+      app.init();
+    });
+  </script>
+</body>
+</html>
